@@ -1,32 +1,33 @@
-import kivy
 from kivy.app import App
 from kivy.uix.boxlayout import BoxLayout
-from kivy.uix.button import Button
 from kivy.uix.label import Label
-import pyaudio
+from kivy.clock import Clock
+from kivy.core.window import Window
 import speech_recognition as sr
+from audio_functions import record_transcribe_save
 
 class VoiceNoteApp(App):
     def build(self):
         self.recognizer = sr.Recognizer()
         layout = BoxLayout(orientation='vertical')
-        self.label = Label(text="Press the button and start speaking")
-        self.button = Button(text="Record", on_press=self.record_voice_note)
+        self.label = Label(text="Recording...")
         layout.add_widget(self.label)
-        layout.add_widget(self.button)
+        Clock.schedule_once(self.start_recording, 1)  # Start recording after 1 second
+        Window.bind(on_touch_up=self.on_touch_up)  # Bind touch event to stop recording
         return layout
 
-    def record_voice_note(self, instance):
-        with sr.Microphone() as source:
-            self.label.text = "Listening..."
-            audio = self.recognizer.listen(source)
-            try:
-                text = self.recognizer.recognize_google(audio)
-                self.label.text = "You said: " + text
-            except sr.UnknownValueError:
-                self.label.text = "Sorry, I could not understand the audio."
-            except sr.RequestError:
-                self.label.text = "Could not request results; check your network connection."
+    def start_recording(self, dt):
+        self.label.text = "Listening..."
+        text = record_transcribe_save(self.recognizer, timeout=5)  # Record, transcribe, and save
+        self.label.text = "You said: " + text
+        Clock.schedule_once(self.stop_recording, 1)  # Schedule stop recording after processing
 
-if __name__ == "__main__":
+    def on_touch_up(self, *args):
+        self.stop_recording()
+
+    def stop_recording(self, *args):
+        self.label.text = "Recording stopped."
+        App.get_running_app().stop()  # Close the application
+
+easeif __name__ == "__main__":
     VoiceNoteApp().run()
