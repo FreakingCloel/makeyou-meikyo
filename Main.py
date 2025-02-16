@@ -4,7 +4,7 @@ from kivy.uix.label import Label
 from kivy.clock import Clock
 from kivy.core.window import Window
 import speech_recognition as sr
-from audio_functions import record_transcribe_save
+from utils.RTAS import record_transcribe_save
 
 class VoiceNoteApp(App):
     def build(self):
@@ -29,5 +29,5 @@ class VoiceNoteApp(App):
         self.label.text = "Recording stopped."
         App.get_running_app().stop()  # Close the application
 
-easeif __name__ == "__main__":
+if __name__ == "__main__":
     VoiceNoteApp().run()
