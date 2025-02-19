@@ -1,82 +1,82 @@
 import torch
-from transformers import pipeline, BertTokenizer, BertModel
+from transformers import AutoModelForSequenceClassification, AutoTokenizer
 import numpy as np
-from sklearn.metrics.pairwise import cosine_similarity
 
-# Load BERT emotion classifier
-emotion_classifier = pipeline("text-classification", model="bhadresh-savani/bert-base-go-emotion", top_k=5)
+# Load the emotion classification model and tokenizer
+MODEL_NAME = "bhadresh-savani/bert-base-go-emotion"
+tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+model = AutoModelForSequenceClassification.from_pretrained(MODEL_NAME)
 
-# Load BERT model & tokenizer for embeddings
-bert_tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
-bert_model = BertModel.from_pretrained("bert-base-uncased")
+# Fatigue Likelihood Fixed Scores
+emotion_heavy_fatigue = 80
+emotion_medium_fatigue = 60
+emotion_neutral_fatigue = 40
+emotion_low_fatigue = 20
 
-# Function to get sentence embedding
-def get_sentence_embedding(text):
-    tokens = bert_tokenizer(text, return_tensors="pt", truncation=True, padding=True)
+# Fatigue Likelihood Matrix
+fatigue_likelihood = {
+    "admiration": emotion_low_fatigue, "amusement": emotion_low_fatigue, "anger": emotion_heavy_fatigue, "annoyance": emotion_medium_fatigue, "approval": emotion_neutral_fatigue, "caring": emotion_neutral_fatigue, "confusion": emotion_heavy_fatigue, "curiosity": emotion_low_fatigue, "desire": 25,
+    "disappointment": emotion_medium_fatigue, "disapproval": emotion_heavy_fatigue, "disgust": emotion_heavy_fatigue, "embarrassment": emotion_heavy_fatigue, "excitement": emotion_neutral_fatigue, "fear": emotion_heavy_fatigue, "gratitude": emotion_neutral_fatigue, "grief": emotion_heavy_fatigue,
+    "joy": emotion_low_fatigue, "love": emotion_low_fatigue, "nervousness": emotion_heavy_fatigue, "neutral": emotion_neutral_fatigue, "optimism": emotion_neutral_fatigue, "pride": emotion_neutral_fatigue, "realization": emotion_low_fatigue
+    , "relief": emotion_neutral_fatigue, "remorse": emotion_heavy_fatigue, "sadness": emotion_medium_fatigue, "surprise": emotion_medium_fatigue
+}
+
+
+# Memo Energy Level Matrix (Trinary)
+memo_energy_levels = {
+    "admiration": "Medium", "amusement": "High", "anger": "High", "annoyance": "Medium", "approval": "Medium", "caring": "Medium", "confusion": "Medium", "curiosity": "High", "desire": "High",
+    "disappointment": "Low", "disapproval": "Medium", "disgust": "Medium", "embarrassment": "Medium", "excitement": "High", "fear": "High", "gratitude": "Medium", "grief": "Low", "joy": "High", "love": "Medium",
+    "nervousness": "High", "neutral": "Medium", "optimism": "High", "pride": "High", "realization": "Medium", "relief": "Medium", "remorse": "Low", "sadness": "Low", "surprise": "High"
+}
+
+# Function to analyze a memo for fatigue likelihood and memo energy classification
+def analyze_memo_energy(emotion_scores: dict):
+    """
+    Given emotion scores (output from BERT), compute:
+    1. Fatigue likelihood (percentage)
+    2. Memo energy classification (High, Medium, Low)
+    """
+    # Select the top 5 emotions by confidence
+    top_5_emotions = dict(sorted(emotion_scores.items(), key=lambda x: x[1], reverse=True)[:5])
+    
+    # Compute fatigue likelihood by averaging fatigue values for top 5 emotions
+    fatigue_values = [fatigue_likelihood.get(emotion, 0) for emotion in top_5_emotions]
+    fatigue_score = sum(fatigue_values) / len(fatigue_values) if fatigue_values else 0
+
+    print(f"Fatigue Values Used: {fatigue_values}")  # Add this inside analyze_memo_energy()
+    
+    # Compute memo energy classification based on top 5 emotions
+    energy_counts = {"High": 0, "Medium": 0, "Low": 0}
+    for emotion in top_5_emotions:
+        if emotion in memo_energy_levels:
+            energy_counts[memo_energy_levels[emotion]] += 1
+    memo_energy = max(energy_counts, key=energy_counts.get)
+    
+    return fatigue_score, memo_energy, top_5_emotions
+
+# Function to classify emotions using BERT
+def classify_emotions(text):
+    inputs = tokenizer(text, return_tensors="pt", truncation=True, padding=True)
     with torch.no_grad():
-        outputs = bert_model(**tokens)
-    return outputs.last_hidden_state[:, 0, :].squeeze().numpy()
+        outputs = model(**inputs)
+    scores = torch.nn.functional.softmax(outputs.logits, dim=-1)[0].tolist()
+    labels = model.config.id2label
+    return {labels[i]: scores[i] for i in range(len(scores))}
 
-# Energy-related concept embeddings (dynamic inference)
-energy_concepts = {
-    "movement": "I feel active and ready to move.",
-    "rest": "I feel like I need to lie down and relax.",
-    "fatigue": "I feel physically drained and tired.",
-    "engagement": "I am focused and mentally present.",
-    "motivation": "I feel inspired and ready to take on challenges.",
-    "stress": "I feel overwhelmed and unable to concentrate."
-}
-
-# Precompute concept embeddings
-concept_embeddings = {
-    key: get_sentence_embedding(value) for key, value in energy_concepts.items()
-}
-
-# Function to infer energy levels dynamically
-def extract_energy(text):
-    memo_embedding = get_sentence_embedding(text)
-    
-    energy_scores = {
-        category: cosine_similarity(memo_embedding.reshape(1, -1), ref_embedding.reshape(1, -1))[0][0]
-        for category, ref_embedding in concept_embeddings.items()
-    }
-    
-    # Normalize energy based on relevant categories
-    physical_energy = 2 * (energy_scores["movement"] - energy_scores["fatigue"]) - 1
-    mental_energy = 2 * (energy_scores["engagement"] - energy_scores["stress"]) - 1
-    
-    return {
-        "physical_energy": round(physical_energy, 3),
-        "mental_energy": round(mental_energy, 3)
-    }
-
-# Function to get emotion classification from BERT
-def extract_sentiment(text):
-    results = emotion_classifier(text)
-    formatted_results = {entry['label']: entry['score'] for entry in results[0]}
-    return formatted_results
-
-# Main function to extract structured analysis
-def extract_structured_keywords(text):
-    emotions = extract_sentiment(text)
-    energy_levels = extract_energy(text)
-    
-    return {
-        "emotions": emotions,
-        "energy_levels": energy_levels
-    }
-
-# Interactive Loop for Testing
-def interactive_testing():
-    print("\nType a sentence to analyze. Type 'exit' to quit.")
-    while True:
-        text = input("Enter text: ").strip()
-        if text.lower() == "exit":
-            print("Exiting interactive mode.")
-            break
-        analysis = extract_structured_keywords(text)
-        print("\nAnalysis:", analysis, "\n")
-
-# Run interactive mode if script is executed directly
+# Terminal loop for user input
 if __name__ == "__main__":
-    interactive_testing()
+    print("Emotion Analysis Terminal - Type a sentence and press Enter (Type 'exit' to quit)")
+    while True:
+        user_input = input("Enter your memo: ")
+        if user_input.lower() == 'exit':
+            break
+        emotion_scores = classify_emotions(user_input)
+        fatigue, memo_energy, top_5_emotions = analyze_memo_energy(emotion_scores)
+        
+        print(f"\nTop 5 Detected Emotions:")
+        for emotion, score in top_5_emotions.items():
+            print(f"  {emotion}: {score:.2f}")
+        
+        print(f"\nFatigue Score: {fatigue}%")
+        print(f"Memo Energy Level: {memo_energy}")
+        print("\n----------------------------------------------------")
